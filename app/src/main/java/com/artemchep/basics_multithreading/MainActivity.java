@@ -5,7 +5,6 @@ import android.os.Handler;
 import android.view.View;
 
 import androidx.annotation.UiThread;
-import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -19,16 +18,17 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
 
+
 public class MainActivity extends AppCompatActivity {
 
     private List<WithMillis<Message>> mList = new ArrayList<>();
 
     private MessageAdapter mAdapter = new MessageAdapter(mList);
 
-    private Queue<WithMillis<Message>> myQueue;
-    private Thread t;
+    private Queue<WithMillis<Message>> queue;
     private boolean tempRun = true;
-    private Handler hnd;
+    private Handler h;
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -39,10 +39,10 @@ public class MainActivity extends AppCompatActivity {
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         recyclerView.setAdapter(mAdapter);
 
-        myQueue = new LinkedList<>();
+        queue = new LinkedList<>();
 
         myHandler();
-        myThreed();
+        myThreedMethod();
 
     }
 
@@ -56,9 +56,9 @@ public class MainActivity extends AppCompatActivity {
         mList.add(message);
         mAdapter.notifyItemInserted(mList.size() - 1);
 
-        synchronized (myQueue) {
-            myQueue.add(message);
-            myQueue.notifyAll();
+        synchronized (queue) {
+            queue.add(new WithMillis<>(message.value, System.currentTimeMillis()));
+            queue.notifyAll();
         }
 
         update(message);
@@ -78,31 +78,32 @@ public class MainActivity extends AppCompatActivity {
         throw new IllegalStateException();
     }
 
-    public void myThreed(){
+    public void myThreedMethod(){
 
-        new Thread(new Runnable() {
+        Thread thread = new Thread(new Runnable() {
             @Override
             public void run() {
                 while(tempRun) {
                     List<WithMillis<Message>> messageArray;
 
-                    synchronized (myQueue) {
-                        messageArray = new ArrayList<>(myQueue);
-                        myQueue.clear();
+                    synchronized (queue) {
+                        messageArray = new ArrayList<>(queue);
+                        queue.clear();
                     }
 
                     for(int i = 0; i < messageArray.size(); i++) {
                         android.os.Message message = android.os.Message.obtain();
                         WithMillis<Message> messageWithMillis = messageArray.get(i);
-                        message.obj = new WithMillis<>(messageWithMillis.value.copy(CipherUtil.encrypt(messageWithMillis.value.plainText)), System.currentTimeMillis());
-                        message.setTarget(hnd);
+                        message.obj = new WithMillis<>(messageWithMillis.value.copy
+                                (CipherUtil.encrypt(messageWithMillis.value.plainText)), System.currentTimeMillis() - messageWithMillis.elapsedMillis);
+                        message.setTarget(h);
                         message.sendToTarget();
                     }
 
-                    synchronized (myQueue) {
-                        if(myQueue.isEmpty()) {
+                    synchronized (queue) {
+                        if(queue.isEmpty()) {
                             try {
-                                myQueue.wait();
+                                queue.wait();
                             } catch (InterruptedException e) {
                                 e.printStackTrace();
                             }
@@ -110,18 +111,20 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
             }
-        }).start();
+        });
+        thread.start();
     }
 
     public void myHandler(){
-
-        hnd = new Handler() {
+       h = new Handler() {
             @Override
             public void handleMessage(android.os.Message msg) {
 
                 WithMillis<Message> messageWithMillis = (WithMillis<Message>) msg.obj;
-                update(new WithMillis<>(messageWithMillis.value.copy(messageWithMillis.value.cipherText),(System.currentTimeMillis() - messageWithMillis.elapsedMillis)));
+                update(new WithMillis<>(messageWithMillis.value.copy(messageWithMillis.value.cipherText),
+                        (messageWithMillis.elapsedMillis)));
             }
         };
     }
 }
+
